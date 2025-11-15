@@ -145,7 +145,7 @@ export class DbStorage implements IStorage {
   }
 
   async submitJobResult(jobId: string, result: any): Promise<void> {
-    await db.update(jobs).set({ result, status: "in_progress" as JobStatus }).where(eq(jobs.id, jobId));
+    await db.update(jobs).set({ result, status: "completed" as JobStatus }).where(eq(jobs.id, jobId));
   }
 
   async completeJob(jobId: string): Promise<void> {

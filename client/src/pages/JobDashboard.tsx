@@ -224,7 +224,11 @@ export default function JobDashboard() {
                 >
                   <h2 className="text-xl font-bold leading-tight tracking-tight mb-4">Results</h2>
                   <div className="bg-card-light dark:bg-card-dark rounded-xl border border-border-light dark:border-border-dark shadow-sm p-6">
-                    <div className="whitespace-pre-wrap text-sm">{job.result}</div>
+                    <div className="whitespace-pre-wrap text-sm">
+                      {typeof job.result === 'object' && job.result !== null
+                        ? (job.result.response || JSON.stringify(job.result, null, 2))
+                        : job.result}
+                    </div>
                   </div>
                 </motion.section>
               )}

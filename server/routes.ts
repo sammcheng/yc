@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { locusPayment } from "./locus-payment";
 import { matchAgentToRequest, executeAgentTask } from "./agent-matcher";
+import { taskQueue } from "./task-queue";
 import { z } from "zod";
 
 const PLATFORM_FEE_PERCENT = 0.10; // 10% platform fee
@@ -48,7 +49,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Submit a task
   app.post("/api/tasks", async (req, res) => {
     try {
-      const { request, userWallet } = req.body;
+      const { request, userWallet, priority } = req.body;
 
       if (!request || !userWallet) {
         return res.status(400).json({ error: "Request and userWallet are required" });
@@ -61,7 +62,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(503).json({ error: "No agents available at the moment" });
       }
 
-      const match = await matchAgentToRequest(request, availableAgents);
+      let match: any;
+      try {
+        // Rate limiter will handle waiting automatically
+        match = await matchAgentToRequest(request, availableAgents, priority || 'balanced');
+      } catch (error: any) {
+        // If rate limited during matching, wait longer and retry
+        if (error.message?.includes('rate limit') || error.status === 429) {
+          console.log(`[TaskSubmission] Rate limited during matching, waiting 35s and retrying...`);
+          await new Promise(resolve => setTimeout(resolve, 35000));
+          try {
+            match = await matchAgentToRequest(request, availableAgents, priority || 'balanced');
+          } catch (retryError: any) {
+            return res.status(429).json({ 
+              error: "API rate limit reached. Please wait 60 seconds and try again.",
+              retryAfter: 60,
+            });
+          }
+        } else {
+          throw error;
+        }
+      }
 
       if (match.confidence < 0.5) {
         return res.status(400).json({ 
@@ -102,15 +123,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         match.reasoning
       );
 
-      // Execute task asynchronously
-      executeAgentTask(agent, request)
-        .then(async (result) => {
+      // Queue task for execution (respects rate limits automatically)
+      const queuePosition = taskQueue.getQueueLength() + 1;
+      const estimatedWaitTime = queuePosition * 35; // ~35s per task in queue
+      
+      taskQueue.enqueue({
+        jobId: job.id,
+        agentId: agent.id,
+        userRequest: request,
+        agent: agent,
+        resolve: async (result) => {
           await storage.submitJobResult(job.id, result);
-        })
-        .catch((error) => {
+        },
+        reject: async (error) => {
           console.error(`[TaskExecution] Failed:`, error);
-          storage.updateJobStatus(job.id, "failed");
-        });
+          
+          // Store error message in result for user visibility
+          const errorMessage = error.message?.includes('rate limit') 
+            ? "Task execution delayed due to API rate limits. Please try again in a minute."
+            : error.message || "Task execution failed. Please try again.";
+          
+          await storage.submitJobResult(job.id, {
+            response: `Error: ${errorMessage}`,
+            agentName: agent.name,
+            capabilities: agent.capabilities,
+            error: true,
+          });
+          await storage.updateJobStatus(job.id, "failed");
+        },
+      }).catch(async (error) => {
+        // If queueing fails, mark job as failed
+        console.error(`[TaskQueue] Failed to queue task:`, error);
+        await storage.updateJobStatus(job.id, "failed");
+      });
 
       res.json({
         success: true,
@@ -127,7 +172,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalCost: totalCost.toFixed(2),
           locusAmount,
         },
-        message: "Task assigned. Agent is working on your request. You can pay after results are delivered.",
+        message: queuePosition > 1 
+          ? `Task queued (position ${queuePosition}). Estimated wait: ~${estimatedWaitTime}s. Agent will process your request automatically.`
+          : "Task assigned. Agent is working on your request. You can pay after results are delivered.",
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

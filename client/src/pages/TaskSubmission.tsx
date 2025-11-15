@@ -49,12 +49,21 @@ export default function TaskSubmission() {
         body: JSON.stringify({
           request: prompt,
           userWallet: userWallet,
+          priority: priority, // Send priority preference
         }),
       })
 
       if (!response.ok) {
         const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to submit task')
+        const errorMsg = errorData.error || 'Failed to submit task'
+        
+        // Check for rate limit errors
+        if (errorMsg.includes('rate limit') || errorMsg.includes('429') || response.status === 429) {
+          const retryAfter = errorData.retryAfter || 60;
+          throw new Error(`API rate limit reached. Your task will be processed automatically once capacity is available (in ~${retryAfter}s). Please wait and check back.`)
+        }
+        
+        throw new Error(errorMsg)
       }
 
       const data = await response.json()
@@ -72,9 +81,14 @@ export default function TaskSubmission() {
             const job = await jobResponse.json()
             
             if (job.status === 'completed' && job.result) {
+              // Extract response from result object if it's an object, otherwise use as string
+              const resultContent = typeof job.result === 'object' && job.result !== null
+                ? (job.result.response || JSON.stringify(job.result, null, 2))
+                : job.result
+              
               setResult({
                 title: `Task Completed by ${job.assignedAgent?.name || 'Agent'}`,
-                content: job.result,
+                content: resultContent,
                 jobId: job.id,
                 agent: job.assignedAgent,
                 pricing: {
