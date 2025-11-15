@@ -80,7 +80,7 @@ export default function TaskSubmission() {
             
             const job = await jobResponse.json()
             
-            if (job.status === 'completed' && job.result) {
+            if ((job.status === 'completed' || job.status === 'in_progress') && job.result) {
               // Extract response from result object if it's an object, otherwise use as string
               const resultContent = typeof job.result === 'object' && job.result !== null
                 ? (job.result.response || JSON.stringify(job.result, null, 2))

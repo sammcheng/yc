@@ -6,7 +6,7 @@ class RateLimiter {
   private requests: number[] = [];
   private readonly maxRequests = 2; // Very conservative - only 2/min
   private readonly windowMs = 60 * 1000; // 1 minute
-  private readonly minDelayBetweenRequests = 30000; // Minimum 30 seconds between ANY requests
+  private readonly minDelayBetweenRequests = 40000; // Minimum 40 seconds between ANY requests (very safe)
 
   async waitIfNeeded(): Promise<void> {
     const now = Date.now();

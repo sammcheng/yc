@@ -14,7 +14,7 @@ class TaskQueue {
   private queue: QueuedTask[] = [];
   private processing = false;
   private lastProcessedTime = 0;
-  private readonly minDelayBetweenTasks = 35000; // 35 seconds between tasks (very conservative)
+  private readonly minDelayBetweenTasks = 45000; // 45 seconds between tasks (very conservative)
 
   async enqueue(task: QueuedTask): Promise<void> {
     this.queue.push(task);

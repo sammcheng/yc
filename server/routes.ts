@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { locusPayment } from "./locus-payment";
 import { matchAgentToRequest, executeAgentTask } from "./agent-matcher";
 import { taskQueue } from "./task-queue";
+import { matchingQueue } from "./task-matcher-queue";
 import { z } from "zod";
 
 const PLATFORM_FEE_PERCENT = 0.10; // 10% platform fee
@@ -62,33 +63,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(503).json({ error: "No agents available at the moment" });
       }
 
+      // Create job first (so we have an ID)
+      const job = await storage.createJob({
+        userRequest: request,
+        userWallet,
+        assignedAgentId: null,
+        status: "pending",
+        paymentStatus: "pending",
+      });
+
+      // Try matching immediately, but if rate limited, queue it
       let match: any;
+      let useQueue = false;
+      
       try {
-        // Rate limiter will handle waiting automatically
+        // Try immediate matching (rate limiter will wait if needed)
         match = await matchAgentToRequest(request, availableAgents, priority || 'balanced');
       } catch (error: any) {
-        // If rate limited during matching, wait longer and retry
-        if (error.message?.includes('rate limit') || error.status === 429) {
-          console.log(`[TaskSubmission] Rate limited during matching, waiting 35s and retrying...`);
-          await new Promise(resolve => setTimeout(resolve, 35000));
-          try {
-            match = await matchAgentToRequest(request, availableAgents, priority || 'balanced');
-          } catch (retryError: any) {
-            return res.status(429).json({ 
-              error: "API rate limit reached. Please wait 60 seconds and try again.",
-              retryAfter: 60,
+        // If rate limited, queue the matching instead of failing
+        if (error.message?.includes('rate limit') || error.status === 429 || error.statusCode === 429) {
+          console.log(`[TaskSubmission] Rate limited during matching, queuing for later...`);
+          useQueue = true;
+          
+          // Queue matching - will resolve later
+          match = await new Promise((resolve, reject) => {
+            matchingQueue.enqueue({
+              request,
+              availableAgents,
+              priority: priority || 'balanced',
+              resolve,
+              reject,
             });
-          }
+          });
         } else {
-          throw error;
+          throw error; // Non-rate-limit error, throw immediately
         }
       }
 
+      // If confidence is low, use fallback instead of failing
       if (match.confidence < 0.5) {
-        return res.status(400).json({ 
-          error: "No suitable agent found",
-          reasoning: match.reasoning,
-        });
+        console.log(`[TaskSubmission] Low confidence match (${match.confidence}), using fallback agent`);
+        const cheapestAgent = availableAgents.sort((a, b) => 
+          parseFloat(a.pricePerCall) - parseFloat(b.pricePerCall)
+        )[0];
+        
+        match = {
+          agentId: cheapestAgent.id,
+          confidence: 0.8,
+          reasoning: `Low confidence match. Assigned to ${cheapestAgent.name} as fallback. Original reasoning: ${match.reasoning || 'No specific match found'}`,
+        };
       }
 
       const agent = availableAgents.find(a => a.id === match.agentId);
@@ -104,15 +127,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Convert to LOCUS
       const locusAmount = await locusPayment.convertUsdToLocus(totalCost);
 
-      // Create job
-      const job = await storage.createJob({
-        userRequest: request,
-        userWallet,
-        assignedAgentId: null,
-        status: "pending",
-        paymentStatus: "pending",
-      });
-
       // Assign agent
       await storage.assignAgent(
         job.id,
@@ -125,7 +139,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Queue task for execution (respects rate limits automatically)
       const queuePosition = taskQueue.getQueueLength() + 1;
-      const estimatedWaitTime = queuePosition * 35; // ~35s per task in queue
+      const estimatedWaitTime = queuePosition * 45; // ~45s per task in queue
       
       taskQueue.enqueue({
         jobId: job.id,
@@ -172,8 +186,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalCost: totalCost.toFixed(2),
           locusAmount,
         },
-        message: queuePosition > 1 
-          ? `Task queued (position ${queuePosition}). Estimated wait: ~${estimatedWaitTime}s. Agent will process your request automatically.`
+        message: useQueue || queuePosition > 1 
+          ? `Task queued${useQueue ? ' (matching in progress)' : ''}${queuePosition > 1 ? ` (position ${queuePosition})` : ''}. Estimated wait: ~${estimatedWaitTime}s. Agent will process your request automatically.`
           : "Task assigned. Agent is working on your request. You can pay after results are delivered.",
       });
     } catch (error: any) {
@@ -185,7 +199,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tasks", async (req, res) => {
     try {
       const tasks = await storage.getAllJobs();
-      res.json(tasks);
+      
+      // Auto-fix: Update any tasks with results but wrong status
+      for (const task of tasks) {
+        if (task.result && task.status !== "completed") {
+          await storage.submitJobResult(task.id, task.result);
+        }
+      }
+      
+      // Re-fetch to get updated statuses
+      const updatedTasks = await storage.getAllJobs();
+      res.json(updatedTasks);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -198,6 +222,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!task) {
         return res.status(404).json({ error: "Task not found" });
       }
+      
+      // Auto-fix: If task has result but status is not completed, update it
+      if (task.result && task.status !== "completed") {
+        await storage.submitJobResult(task.id, task.result);
+        // Re-fetch to get updated status
+        const updatedTask = await storage.getJob(req.params.id);
+        return res.json(updatedTask);
+      }
+      
       res.json(task);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

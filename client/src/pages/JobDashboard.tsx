@@ -216,7 +216,7 @@ export default function JobDashboard() {
               )}
 
               {/* Results Section */}
-              {job.result && (
+              {(job.result && (job.status === 'completed' || job.status === 'in_progress')) && (
                 <motion.section
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}

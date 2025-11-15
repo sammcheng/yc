@@ -125,7 +125,7 @@ Return JSON: {
   "reasoning": "Brief explanation of why this agent is the best match"
 }
 
-If no agent is suitable, return confidence < 0.5 and explain why.`,
+Always return a match with confidence >= 0.5. If no agent is perfect, choose the best available option (usually Quick Assistant for general questions, or the most relevant specialist). Never return confidence < 0.5.`,
       messages: [
         {
           role: "user",
