@@ -11,7 +11,21 @@ export default {
         sm: ".1875rem", /* 3px */
       },
       colors: {
-        // Flat / base colors (regular buttons)
+        // VBeta_Google colors
+        primary: '#4A69FF',
+        secondary: '#7D5FFF',
+        'secondary-green': '#1DD1A1',
+        'background-light': '#f5f6fa',
+        'background-dark': '#111418',
+        'text-light': '#2d3436',
+        'text-dark': '#f5f6fa',
+        'card-light': '#ffffff',
+        'card-dark': '#1c2127',
+        'border-light': '#dfe4ea',
+        'border-dark': '#3b4754',
+        'custom-blue': '#4A90E2',
+        'custom-green': '#50E3C2',
+        // Original colors (for backward compatibility)
         background: "hsl(var(--background) / <alpha-value>)",
         foreground: "hsl(var(--foreground) / <alpha-value>)",
         border: "hsl(var(--border) / <alpha-value>)",
@@ -25,16 +39,6 @@ export default {
           DEFAULT: "hsl(var(--popover) / <alpha-value>)",
           foreground: "hsl(var(--popover-foreground) / <alpha-value>)",
           border: "hsl(var(--popover-border) / <alpha-value>)",
-        },
-        primary: {
-          DEFAULT: "hsl(var(--primary) / <alpha-value>)",
-          foreground: "hsl(var(--primary-foreground) / <alpha-value>)",
-          border: "var(--primary-border)",
-        },
-        secondary: {
-          DEFAULT: "hsl(var(--secondary) / <alpha-value>)",
-          foreground: "hsl(var(--secondary-foreground) / <alpha-value>)",
-          border: "var(--secondary-border)",
         },
         muted: {
           DEFAULT: "hsl(var(--muted) / <alpha-value>)",
@@ -89,6 +93,7 @@ export default {
         },
       },
       fontFamily: {
+        display: ['Space Grotesk', 'sans-serif'],
         sans: ["var(--font-sans)"],
         serif: ["var(--font-serif)"],
         mono: ["var(--font-mono)"],
@@ -109,5 +114,5 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
+  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography"), require("@tailwindcss/forms")],
 } satisfies Config;
